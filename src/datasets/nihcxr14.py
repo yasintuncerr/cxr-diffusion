@@ -12,66 +12,50 @@ class NIHDataset(Dataset):
     """NIH Chest X-ray Dataset loader"""
     
     def __init__(self, root_dir: str, img_size: int = 224):
-        """
-        Args:
-            root_dir: Dataset root directory
-            img_size: Target image size (default: 224)
-        """
         self.root = Path(root_dir)
         self.img_size = img_size
         
         if not self.root.exists():
             raise FileNotFoundError(f"Root directory not found: {self.root}")
             
-        self.df = self._load_metadata()
+        # Load metadata and embeddings separately
+        self.df, self.embeddings = self._load_metadata()
         self._map_image_paths()
     
-    def _load_metadata(self) -> pd.DataFrame:
-        """Load and combine all parquet files from elixrb directory"""
+    def _load_metadata(self) -> tuple[pd.DataFrame, np.ndarray]:
+        """Load metadata and embeddings separately"""
         meta_dir = self.root / 'elixrb'
         if not meta_dir.exists():
             raise FileNotFoundError(f"Metadata directory not found: {meta_dir}")
             
-        # Combine all parquet files
         parquet_files = list(meta_dir.glob('*.parquet'))
-        if not parquet_files:
-            raise FileNotFoundError(f"No parquet files found in {meta_dir}")
-
-
         h5_files = list(meta_dir.glob('*.h5'))
-        if not h5_files:
-            raise FileNotFoundError(f"No h5 files found in {meta_dir}")
         
+        if not parquet_files or not h5_files:
+            raise FileNotFoundError("Missing required files")
 
         dataframes = []
-
         embeds = []
-        # Check file pairs exist
+        
         for h5_file in h5_files:
-            parquet_file = meta_dir / f"{h5_file.stem}.parquet"
-            with h5py.File(h5_file, 'r') as f:
-                embeddings = f['embeddings'][:]
-                df = pd.read_parquet(parquet_file)
-
-                if len(embeddings) != len(df):
-                    raise ValueError(f"Mismatch in {h5_file.stem}: embeddings:{len(embeddings)} df:{len(df)}")
-                
-                
-                embeds.append(embeddings)
-
-                dataframes.append(df)
-
-
-            # Check that all parquet files exist
+            filename = h5_file.stem
+            common_name = '_'.join(filename.split('_')[:-1])
+            parquet_file = meta_dir / f"{common_name}.parquet"
+            
             if not parquet_file.exists():
                 raise FileNotFoundError(f"Missing parquet file for {h5_file}")
             
-        # Combine all dataframes
-
-        self.df = pd.concat(dataframes)
-        self.df['embeddings'] = np.concatenate(embeds)
-
-        return self.df
+            with h5py.File(h5_file, 'r') as f:
+                embeddings = f['embeddings'][:]
+                df = pd.read_parquet(parquet_file)
+                
+                if len(embeddings) != len(df):
+                    raise ValueError(f"Mismatch in {h5_file.stem}")
+                
+                embeds.append(embeddings)
+                dataframes.append(df)
+            
+        return pd.concat(dataframes), np.concatenate(embeds)
 
     def _map_image_paths(self):
         """Create mapping of image names to their full paths"""
@@ -102,39 +86,60 @@ class NIHDataset(Dataset):
         if missing_images:
             raise FileNotFoundError(f"Could not find paths for images: {missing_images[:5]}...")
 
-    def filter_by_label(self, label: str, exclude: bool = False) -> 'NIHDataset':
+    def filter_by_labels(self, target_labels: list, mode: str = 'include') -> 'NIHDataset':
         """
-        Filter dataset by label.
-        Args:
-            label: Target label
-            exclude: If True, exclude samples with label instead of keeping them
-        Returns:
-            New filtered dataset instance
+        Filter dataset by labels while keeping embeddings synchronized.
+        Only keeps samples that ONLY have the target labels.
         """
         new_dataset = copy.deepcopy(self)
-        mask = new_dataset.df['Finding Labels'].apply(lambda x: label in x)
-        new_dataset.df = new_dataset.df[~mask if exclude else mask]
+        print(f"\nFiltering for labels: {target_labels}, mode={mode}")
+        print("DataFrame shape before filtering:", new_dataset.df.shape)
+
+        def check_labels(labels):
+            if isinstance(labels, (list, np.ndarray)):
+                # Sadece hedef etiketlere sahip örnekleri seç
+                return all(label in target_labels for label in labels)
+            else:
+                labels_list = str(labels).split('|')
+                return all(label in target_labels for label in labels_list)
+
+        # Get boolean mask
+        mask = new_dataset.df['Finding Labels'].apply(check_labels)
+        selected_indices = np.where(mask)[0]
+
+        # Filter both DataFrame and embeddings
+        new_dataset.df = new_dataset.df.iloc[selected_indices]
+        new_dataset.embeddings = new_dataset.embeddings[selected_indices]
+
         return new_dataset
     
     def limit_samples(self, label: str, max_samples: int) -> 'NIHDataset':
-        """
-        Limit number of samples for a given label while preserving other samples.
-        Args:
-            label: Target label to limit
-            max_samples: Maximum number of samples to keep for the target label
-        Returns:
-            New dataset instance with limited samples for target label
-        """
+        """Limit samples while keeping embeddings synchronized"""
         new_dataset = copy.deepcopy(self)
         has_label = new_dataset.df['Finding Labels'].apply(lambda x: label in x)
-        label_df = new_dataset.df[has_label]
-        other_df = new_dataset.df[~has_label]
         
-        if len(label_df) > max_samples:
-            label_df = label_df.sample(n=max_samples, random_state=42)
+        label_indices = np.where(has_label)[0]
+        other_indices = np.where(~has_label)[0]
         
-        new_dataset.df = pd.concat([label_df, other_df])
+        if len(label_indices) > max_samples:
+            selected_label_indices = np.random.choice(
+                label_indices, max_samples, replace=False
+            )
+            selected_indices = np.concatenate([selected_label_indices, other_indices])
+            
+            new_dataset.df = new_dataset.df.iloc[selected_indices]
+            new_dataset.embeddings = new_dataset.embeddings[selected_indices]
+        
         return new_dataset
+    
+    def __getitem__(self, idx: int) -> tuple[pd.Series, np.ndarray]:
+        """Return both metadata and embedding for an index"""
+        if self.embeddings is None:
+            return self.df.iloc[idx]   
+        return self.df.iloc[idx], self.embeddings[idx]
+    
+    def __len__(self) -> int:
+        return len(self.df)
     
     def get_label_counts(self) -> dict:
         """Get counts of unique labels in the dataset"""
@@ -147,18 +152,29 @@ class NIHDataset(Dataset):
     def select_columns(self, columns: list) -> 'NIHDataset':
         """Create new dataset with only selected columns"""
         new_dataset = copy.deepcopy(self)
-        new_dataset.df = new_dataset.df[columns]
-        return new_dataset
     
+        df_columns = [col for col in columns if col != 'Embeddings']
+        keep_embeddings = 'Embeddings' in columns
+    
+        for col in df_columns:
+            if col not in self.df.columns:
+                raise ValueError(f"Column not found in DataFrame: {col}")
+    
+        new_dataset.df = new_dataset.df[df_columns]
+    
+        
+        if not keep_embeddings:
+            new_dataset.embeddings = None
+        
+        return new_dataset
+
     def get_fields(self) -> list:
         """Get list of fields in the dataset"""
-        return self.df.columns.tolist()
-
-    def __len__(self) -> int:
-        return len(self.df)
+        fields = list(self.df.columns)
+        if self.embeddings is not None:
+            fields = ['Embeddings'] + fields
+        return fields
     
-    def __getitem__(self, idx: int) -> pd.Series:
-        return self.df.iloc[idx]
    
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
