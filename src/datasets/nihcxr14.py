@@ -5,6 +5,7 @@ import numpy as np
 from PIL import Image
 from torch.utils.data import Dataset
 import copy
+import h5py
 
 
 class NIHDataset(Dataset):
@@ -35,9 +36,43 @@ class NIHDataset(Dataset):
         parquet_files = list(meta_dir.glob('*.parquet'))
         if not parquet_files:
             raise FileNotFoundError(f"No parquet files found in {meta_dir}")
+
+
+        h5_files = list(meta_dir.glob('*.h5'))
+        if not h5_files:
+            raise FileNotFoundError(f"No h5 files found in {meta_dir}")
+        
+
+        dataframes = []
+
+        embeds = []
+        # Check file pairs exist
+        for h5_file in h5_files:
+            parquet_file = meta_dir / f"{h5_file.stem}.parquet"
+            with h5py.File(h5_file, 'r') as f:
+                embeddings = f['embeddings'][:]
+                df = pd.read_parquet(parquet_file)
+
+                if len(embeddings) != len(df):
+                    raise ValueError(f"Mismatch in {h5_file.stem}: embeddings:{len(embeddings)} df:{len(df)}")
+                
+                
+                embeds.append(embeddings)
+
+                dataframes.append(df)
+
+
+            # Check that all parquet files exist
+            if not parquet_file.exists():
+                raise FileNotFoundError(f"Missing parquet file for {h5_file}")
             
-        return pd.concat([pd.read_parquet(f) for f in parquet_files])
-    
+        # Combine all dataframes
+
+        self.df = pd.concat(dataframes)
+        self.df['embeddings'] = np.concatenate(embeds)
+
+        return self.df
+
     def _map_image_paths(self):
         """Create mapping of image names to their full paths"""
         # Find appropriate image directory based on size
@@ -122,13 +157,9 @@ class NIHDataset(Dataset):
     def __len__(self) -> int:
         return len(self.df)
     
-    def __getitem__(self, idx: int) -> tuple:
+    def __getitem__(self, idx: int) -> pd.Series:
         return self.df.iloc[idx]
-
-
-
-
-        
+   
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from functools import partial
