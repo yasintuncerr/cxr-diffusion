@@ -99,29 +99,12 @@ class FeatureConditionedUNet(PreTrainedModel):
         self.projection = ElixrBProjection(projection_config)
     
     def forward(self, x, timesteps, features, return_dict=False):
-        batch_size = x.shape[0]
-        
-        # Expand features if needed
-        if len(features.shape) == 2:
-            features = features.unsqueeze(0).repeat(batch_size, 1, 1)
-        
-        # Project features
-        features = self.projection(features)
-        
-        # Pad or truncate to 77 tokens
-        if features.shape[1] < 77:
-            padding = torch.zeros(
-                batch_size, 
-                77-features.shape[1], 
-                features.shape[-1],
-                device=features.device
-            )
-            features = torch.cat([features, padding], dim=1)
-        elif features.shape[1] > 77:
-            print(f"Warning: features.shape[1] > 77, truncating to 77")
-            features = features[:, :77, :]
-        
-        return self.unet(x, timesteps, encoder_hidden_states=features, return_dict=return_dict)
+        return self.unet(
+        x, 
+        timesteps, 
+        encoder_hidden_states=features,
+        return_dict=return_dict
+    )
     
     def save_pretrained(self, save_directory, **kwargs):
         """Save both UNet and projection models."""
