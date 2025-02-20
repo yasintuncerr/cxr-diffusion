@@ -80,6 +80,7 @@ class FeatureConditionedUNet(PreTrainedModel):
     config_class = FeatureConditionedUNetConfig
     base_model_prefix = "feature_conditioned_unet"
     
+    
     def __init__(self, config: FeatureConditionedUNetConfig):
         super().__init__(config)
         
@@ -125,7 +126,8 @@ class FeatureConditionedUNet(PreTrainedModel):
     def save_pretrained(self, save_directory, **kwargs):
         """Save both UNet and projection models."""
         # Save the main config
-        self.config.unet_config = self.unet.config.to_dict()
+        # Convert FrozenDict to regular dict
+        self.config.unet_config = dict(self.unet.config)
         self.config.projection_config = self.projection.config.to_dict()
         super().save_pretrained(save_directory, **kwargs)
         
