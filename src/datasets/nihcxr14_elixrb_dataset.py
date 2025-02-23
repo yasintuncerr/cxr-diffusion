@@ -7,7 +7,8 @@ import numpy as np
 import torch
 from torch.utils.data import Dataset
 
-from huggingface_hub import login, HFValidationError, HFInvalidLoginError, snapshot_download
+from huggingface_hub import login, snapshot_download
+from huggingface_hub.utils import HfHubHTTPError
 
 import dotenv 
 dotenv.load_dotenv()
@@ -29,11 +30,8 @@ def _download_embeddings_dataset(token: str, download_dir: str) -> bool:
         if token is None:
             raise ValueError("Please provide a valid token")
         login(token)
-    except HFValidationError as e:
-        print(f"Token validation error: {e}")
-        return False
-    except HFInvalidLoginError as e:
-        print(f"Invalid login: {e}")
+    except HfHubHTTPError as e:
+        print(f"Hub authentication error: {e}")
         return False
     except Exception as e:
         print(f"Unexpected Login Error: {e}")
@@ -62,8 +60,8 @@ def _download_embeddings_dataset(token: str, download_dir: str) -> bool:
     except Exception as e:
         print(f"Error downloading repository: {e}")
         return False
-    
-    
+
+
 class NIHElixrbDataset(Dataset):
     """
     Dataset class for NIH-CXR-14 chest X-ray ELIXRB embeddings.
@@ -79,7 +77,6 @@ class NIHElixrbDataset(Dataset):
         
         self.transform = transform
         self._initialize_dataset()
-    
 
     def _initialize_dataset(self):
         """
@@ -107,21 +104,18 @@ class NIHElixrbDataset(Dataset):
                 self.file_sizes.append(len(image_ids))
                 self.count += len(image_ids)
 
-
-    def _decode_image_id(self, img_ids: Union[bytes, list]):
+    def _decode_image_id(self, img_ids: Union[bytes, list]) -> Union[str, list]:
         """
         In elixrb we used a custom encoding for image IDs to store additional information.
         This method decodes the image ID to extract the original image ID.
         """
-        if isinstance(img_id, bytes):
-            img_id = img_ids.decode('utf-8')
-        elif isinstance(img_id, list):
-            img_id = [i.decode('utf-8') for i in img_ids]
+        if isinstance(img_ids, bytes):
+            return img_ids.decode('utf-8')
+        elif isinstance(img_ids, list):
+            return [i.decode('utf-8') for i in img_ids]
+        return img_ids
 
-        return img_id
-    
-
-    def __len__(self):
+    def __len__(self) -> int:
         return sum(self.file_sizes)
 
     def _find_by_image_id(self, image_id: str) -> Tuple[str, int]:
