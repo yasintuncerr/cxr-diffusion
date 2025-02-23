@@ -4,13 +4,16 @@ import PIL
 from typing import Optional, Union, List
 from diffusers import AutoencoderKL
 from diffusers.image_processor import VaeImageProcessor
-
 class VaeProcessor:
     def __init__(self, 
-                 vae: AutoencoderKL = AutoencoderKL.from_pretrained("stable-diffusion-v1-5/stable-diffusion-v1-5", subfolder="vae"),
-                 device: str = "cuda"):
+                 device: Union[str, torch.device] = "cuda",
+                 vae: Optional[AutoencoderKL] = None):
         
-        self.device = device
+        self.device = device if isinstance(device, torch.device) else torch.device(device)
+        
+        if vae is None:
+            vae = AutoencoderKL.from_pretrained("stable-diffusion-v1-5/stable-diffusion-v1-5", subfolder="vae")
+        
         self.vae = vae.to(self.device)  # Move VAE to the specified device
         self.image_processor = VaeImageProcessor()
 
