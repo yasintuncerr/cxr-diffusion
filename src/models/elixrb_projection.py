@@ -64,7 +64,7 @@ class ElixrBProjection(PreTrainedModel):
 
 
 @dataclass
-class FeatureConditionedUNetConfig(PretrainedConfig):
+class ElixrConditionedUNetConfig(PretrainedConfig):
     """Configuration class for FeatureConditionedUNet."""
     
     feature_dim: int = 4096
@@ -72,16 +72,20 @@ class FeatureConditionedUNetConfig(PretrainedConfig):
     projection_config: Optional[dict] = None
     model_type: str = "feature_conditioned_unet"
     
-    def __post_init__(self):
-        super().__init__()
+    def __init__(self, **kwargs):
+        self.feature_dim = kwargs.pop("feature_dim", 4096)
+        self.unet_config = kwargs.pop("unet_config", None)
+        self.projection_config = kwargs.pop("projection_config", None)
+        self.model_type = kwargs.pop("model_type", "feature_conditioned_unet")
+        
+        # Initialize parent class with remaining kwargs
+        super().__init__(**kwargs)
 
-
-class FeatureConditionedUNet(PreTrainedModel):
-    config_class = FeatureConditionedUNetConfig
-    base_model_prefix = "feature_conditioned_unet"
+class ElixrConditionedUNet(PreTrainedModel):
+    config_class = ElixrConditionedUNetConfig
+    base_model_prefix = "elixr_conditioned_unet"
     
-    
-    def __init__(self, config: FeatureConditionedUNetConfig):
+    def __init__(self, config: ElixrConditionedUNetConfig):
         super().__init__(config)
         
         # Initialize UNet
@@ -91,29 +95,31 @@ class FeatureConditionedUNet(PreTrainedModel):
             raise ValueError("UNet config must be provided.")
         
         # Initialize projection
-        projection_config = ElixrBProjectionConfig(
-            input_dim=config.feature_dim,
-            cross_attention_dim=self.unet.config.cross_attention_dim,
+        projection_kwargs = {
+            "input_dim": config.feature_dim,
             **(config.projection_config or {})
-        )
+        }
+        # Only set cross_attention_dim if not already in projection_config
+        if "cross_attention_dim" not in projection_kwargs:
+            projection_kwargs["cross_attention_dim"] = self.unet.config.cross_attention_dim
+            
+        projection_config = ElixrBProjectionConfig(**projection_kwargs)
         self.projection = ElixrBProjection(projection_config)
     
     def forward(self, x, timesteps, features, return_dict=False):
+        projected_features = self.projection(features)
         return self.unet(
-        x, 
-        timesteps, 
-        encoder_hidden_states=features,
-        return_dict=return_dict
-    )
+            x, 
+            timesteps, 
+            encoder_hidden_states=projected_features,
+            return_dict=return_dict
+        )
     
     def save_pretrained(self, save_directory, **kwargs):
         """Save both UNet and projection models."""
         # Save the main config
-        # Convert FrozenDict to regular dict
         self.config.unet_config = dict(self.unet.config)
-        self.config.projection_config = self.projection.config.to_dict()
-        super().save_pretrained(save_directory, **kwargs)
-        
+        self.config.projection_config = self.projection.config.to_dict()        
         # Save UNet and projection in subdirectories
         self.unet.save_pretrained(f"{save_directory}/unet")
         self.projection.save_pretrained(f"{save_directory}/projection")
