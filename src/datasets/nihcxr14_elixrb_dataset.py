@@ -128,13 +128,20 @@ class NIHElixrbDataset(Dataset):
         Returns:
             tuple: (filepath, index in file)
         """
+        # Remove file extension if present
         image_id = image_id.split(".")[0]
-
+        
+        # Create the byte string format that matches the stored format
+        byte_image_id = f"b'{image_id}'"
+        
         for file_map in self.h5_image_mappings:
             for filepath, image_ids in file_map.items():
-                if image_id in image_ids:
-                    return filepath, np.where(image_ids == image_id)[0][0]
-    
+                # Convert image_ids to the same format for comparison
+                image_ids_list = [str(id) for id in image_ids]
+                if byte_image_id in image_ids_list:
+                    idx = image_ids_list.index(byte_image_id)
+                    return filepath, idx
+        
         raise ValueError(f"Image ID not found: {image_id}")
 
     def __getitem__(self, idx: Union[str, int]) -> Tuple[torch.Tensor, str]:
@@ -149,7 +156,6 @@ class NIHElixrbDataset(Dataset):
         """
         if isinstance(idx, str):
             filepath, index = self._find_by_image_id(idx)
-
         elif isinstance(idx, int):
             if idx < 0 or idx >= sum(self.file_sizes):
                 raise IndexError("Index out of range")
