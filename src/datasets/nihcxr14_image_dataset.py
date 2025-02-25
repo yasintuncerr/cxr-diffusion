@@ -42,6 +42,11 @@ class NIHImageDataset(Dataset):
             
         self._scan_files()
 
+    def get_image_ids(self) -> Tuple[str]:
+        """Get all image IDs in the dataset."""
+        return tuple(self._image_mapping.keys())
+
+
     def _check_cache_mapping(self) -> bool:
         """Check if the image mapping is already cached and load it if available."""
         cache_file = self.root / '.nih_cxr14_image_id_path_mapping.pkl'
@@ -128,11 +133,14 @@ class NIHImageDataset(Dataset):
                 
                 if self.transform:
                     img = self.transform(img)
-                    
-                return img, img_id
+                
+                # Make a copy to ensure we're not returning a reference that might be closed
+                img_copy = img.copy()
+                return img_copy, img_id
             except (IOError, OSError) as e:
                 raise IOError(f"Error loading image {img_id}: {str(e)}")
             finally:
+                # Close the original image, but we're returning a copy
                 if hasattr(img, 'close'):
                     img.close()
                     
