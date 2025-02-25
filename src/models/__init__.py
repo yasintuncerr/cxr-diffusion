@@ -1,11 +1,3 @@
-from .elixrb_projection import ElixrBProjectionConfig, ElixrBProjection,ElixrConditionedUNet, ElixrConditionedUNetConfig
-from .elixrb_classifier import MultiClassifier as ElixrbClassifier
+from .elixr import ELIXRC
 
-
-__all__ = [
-    'ElixrBProjectionConfig',
-    'ElixrBProjection',
-    'ElixrConditionedUNet',
-    'ElixrConditionedUNetConfig',
-    'ElixrbClassifier'
-]
+__all__ = ['ELIXRC']
