@@ -22,7 +22,7 @@ class ELIXRC:
             model_repo_id: HuggingFace repo ID for the model
             verbose: Whether to print verbose logging messages
         """
-        self.model_dir = model_dir or '/tmp/elixr-model'
+        self.model_dir = model_dir or os.environ.get('HF_HOME')
         self.model_repo_id = model_repo_id
         self.verbose = verbose
         
