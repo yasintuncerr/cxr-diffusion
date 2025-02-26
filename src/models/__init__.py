@@ -1,3 +1,3 @@
-from .elixr import ELIXRC
+from .elixr import ELIXR
 
-__all__ = ['ELIXRC']
+__all__ = ['ELIXR']
