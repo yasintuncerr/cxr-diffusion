@@ -1,7 +1,7 @@
 import os
 import pickle
 from pathlib import Path
-from typing import Union, Tuple, Optional
+from typing import Union, Tuple, Optional, List, Dict
 
 from PIL import Image
 import torch
@@ -9,7 +9,7 @@ from torch.utils.data import Dataset
 
 class NIHImageDataset(Dataset):
     """
-    Dataset class for NIH CXR-14 chest X-ray images.
+    Dataset class for NIH CXR-14 chest X-ray images with consistent iteration order.
     
     The dataset is organized in directories images_001 through images_012,
     each containing an 'images' subdirectory with the actual image files.
@@ -34,6 +34,7 @@ class NIHImageDataset(Dataset):
         self.img_size = img_size
         self.transform = transform
         self._image_mapping = {}
+        self._sorted_keys = []  # Store sorted keys for consistent iteration
         
         self._scan_nih_cxr14_directory()
         
@@ -43,9 +44,8 @@ class NIHImageDataset(Dataset):
         self._scan_files()
 
     def get_image_ids(self) -> Tuple[str]:
-        """Get all image IDs in the dataset."""
-        return tuple(self._image_mapping.keys())
-
+        """Get all image IDs in the dataset in a consistent order."""
+        return tuple(self._sorted_keys)
 
     def _check_cache_mapping(self) -> bool:
         """Check if the image mapping is already cached and load it if available."""
@@ -53,8 +53,18 @@ class NIHImageDataset(Dataset):
         try:
             if cache_file.exists():
                 with open(cache_file, 'rb') as f:
-                    self._image_mapping = pickle.load(f)
-                return True
+                    cached_data = pickle.load(f)
+                    
+                    # Check if the cache format is the new combined format
+                    if isinstance(cached_data, dict) and 'mapping' in cached_data and 'sorted_keys' in cached_data:
+                        self._image_mapping = cached_data['mapping']
+                        self._sorted_keys = cached_data['sorted_keys']
+                    else:
+                        # Handle old cache format (backward compatibility)
+                        self._image_mapping = cached_data
+                        self._sorted_keys = sorted(list(self._image_mapping.keys()))
+                        
+                    return True
         except (pickle.PickleError, IOError) as e:
             print(f"Warning: Failed to load cache mapping: {e}")
         return False
@@ -78,50 +88,62 @@ class NIHImageDataset(Dataset):
 
     def _scan_files(self) -> None:
         """Scan and map all image files in the dataset directory structure."""
-        # Find all image directories dynamically
+        # Find all image directories dynamically and sort them
         self.dirs = sorted([
             d for d in self.root.iterdir() 
             if d.is_dir() and d.name.startswith('images_')
         ])
+        
+        temp_mapping = {}
         
         for directory in self.dirs:
             images_dir = directory / 'images'
             if not images_dir.exists():
                 continue  # Skip directories without images subdirectory
             
-            # Update mapping with all images in current directory
-            self._image_mapping.update({
-                img.name: img 
-                for img in images_dir.iterdir() 
-                if img.suffix.lower() in ['.png', '.jpg', '.jpeg']
-            })
+            # Get all images in current directory
+            for img in sorted(images_dir.iterdir()):
+                if img.suffix.lower() in ['.png', '.jpg', '.jpeg']:
+                    temp_mapping[img.name] = img
+        
+        # Sort the mapping by keys
+        self._image_mapping = {k: temp_mapping[k] for k in sorted(temp_mapping.keys())}
+        self._sorted_keys = list(self._image_mapping.keys())
 
         if not self._image_mapping:
             raise FileNotFoundError(f"No valid image files found in {self.root}")
 
-        # Cache the mapping
+        # Cache the mapping and sorted keys in a single file
         try:
             cache_file = self.root / '.nih_cxr14_image_id_path_mapping.pkl'
+            
+            # Create a combined dictionary
+            combined_cache = {
+                'mapping': self._image_mapping,
+                'sorted_keys': self._sorted_keys
+            }
+            
             with open(cache_file, 'wb') as f:
-                pickle.dump(self._image_mapping, f)
+                pickle.dump(combined_cache, f)
+                
         except (pickle.PickleError, IOError) as e:
             print(f"Warning: Failed to cache mapping: {e}")
 
     def __len__(self) -> int:
         """Returns the total number of images in the dataset."""
-        return len(self._image_mapping)
+        return len(self._sorted_keys)
 
     def __getitem__(self, idx: Union[int, str]) -> Tuple[Union[Image.Image, torch.Tensor], str]:
-        """Retrieve an image and its ID from the dataset."""
+        """Retrieve an image and its ID from the dataset in a consistent order."""
         try:
             if isinstance(idx, str):
                 img_id = idx
                 if img_id not in self._image_mapping:
                     raise KeyError(f"Image ID '{img_id}' not found in dataset")
             elif isinstance(idx, int):
-                if idx < 0 or idx >= len(self._image_mapping):
+                if idx < 0 or idx >= len(self._sorted_keys):
                     raise IndexError("Index out of range")
-                img_id = list(self._image_mapping.keys())[idx]
+                img_id = self._sorted_keys[idx]  # Use sorted keys for consistent ordering
             else:
                 raise ValueError("Index must be an integer or a string")
     
@@ -146,3 +168,17 @@ class NIHImageDataset(Dataset):
                     
         except Exception as e:
             raise RuntimeError(f"Error accessing item at {idx}: {str(e)}")
+
+    def get_subset(self, start_idx: int, end_idx: int) -> List[str]:
+        """
+        Get a subset of image IDs from the dataset based on index range.
+        Useful for processing specific chunks of the dataset.
+        
+        Args:
+            start_idx: Starting index (inclusive)
+            end_idx: Ending index (exclusive)
+            
+        Returns:
+            List of image IDs in the specified range
+        """
+        return self._sorted_keys[start_idx:end_idx]
