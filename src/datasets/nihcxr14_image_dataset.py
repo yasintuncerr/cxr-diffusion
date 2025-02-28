@@ -6,6 +6,39 @@ from typing import Union, Tuple, Optional, List, Dict
 from PIL import Image
 import torch
 from torch.utils.data import Dataset
+from functools import partial
+import multiprocessing
+import logging
+
+
+# Independent processing function - must be defined outside the class
+def _process_single_image(image_path, destination_dir, source_base_dir, transform_function):
+    """Helper function that processes a single image"""
+    try:
+        # Create destination path
+        destination_image_path = destination_dir / image_path.relative_to(source_base_dir)
+        
+        # Skip if destination already exists
+        if destination_image_path.exists():
+            return True
+            
+        # Process the image
+        with Image.open(image_path) as image:
+            transformed_image = transform_function(image)
+            
+            # Ensure directory exists
+            os.makedirs(destination_image_path.parent, exist_ok=True)
+            
+            # Save the transformed image
+            transformed_image.save(destination_image_path)
+            
+        return True
+        
+    except Exception as e:
+        print(f"Error processing {image_path}: {str(e)}")
+        return False
+
+
 
 class NIHImageDataset(Dataset):
     """
@@ -16,14 +49,12 @@ class NIHImageDataset(Dataset):
     
     Args:
         root_dir (str): Root directory of the dataset
-        img_size (Optional[int]): If provided, looks for resized images in {img_size}x{img_size} subdirectory
         transform (Optional[callable]): Optional transform to be applied to images
         cache_mapping (bool): Whether to cache the image path mapping to disk
     """
     def __init__(
         self, 
         root_dir: str, 
-        img_size: Optional[int] = None,
         transform: Optional[callable] = None,
         cache_mapping: bool = True
     ):
@@ -31,7 +62,6 @@ class NIHImageDataset(Dataset):
         if not self.root.exists():
             raise FileNotFoundError(f"Root directory not found: {self.root}")
         
-        self.img_size = img_size
         self.transform = transform
         self._image_mapping = {}
         self._sorted_keys = []  # Store sorted keys for consistent iteration
@@ -46,6 +76,10 @@ class NIHImageDataset(Dataset):
     def get_image_ids(self) -> Tuple[str]:
         """Get all image IDs in the dataset in a consistent order."""
         return tuple(self._sorted_keys)
+    def get_image_paths(self) -> Tuple[Path]:
+        """Get all image paths in the dataset in a consistent order."""
+        return tuple(self._image_mapping.values())
+    
 
     def _check_cache_mapping(self) -> bool:
         """Check if the image mapping is already cached and load it if available."""
@@ -71,10 +105,6 @@ class NIHImageDataset(Dataset):
 
     def _scan_nih_cxr14_directory(self) -> None:
         """Verify and set up the NIH CXR-14 directory structure."""
-        if self.img_size is not None:
-            resized_dir = self.root / f"{self.img_size}x{self.img_size}"
-            if resized_dir.exists():
-                self.root = resized_dir
 
         if not self.root.exists():
             raise FileNotFoundError(f"Root directory not found: {self.root}")
@@ -156,14 +186,21 @@ class NIHImageDataset(Dataset):
                 if self.transform:
                     img = self.transform(img)
                 
-                # Make a copy to ensure we're not returning a reference that might be closed
-                img_copy = img.copy()
+                # Handle both PIL Images and PyTorch Tensors correctly
+                if isinstance(img, torch.Tensor):
+                    # For tensors, use clone() instead of copy()
+                    img_copy = img.clone()
+                else:
+                    # For PIL images, use copy()
+                    img_copy = img.copy()
+                    
                 return img_copy, img_id
+                
             except (IOError, OSError) as e:
                 raise IOError(f"Error loading image {img_id}: {str(e)}")
             finally:
                 # Close the original image, but we're returning a copy
-                if hasattr(img, 'close'):
+                if hasattr(img, 'close') and not isinstance(img, torch.Tensor):
                     img.close()
                     
         except Exception as e:
@@ -182,3 +219,71 @@ class NIHImageDataset(Dataset):
             List of image IDs in the specified range
         """
         return self._sorted_keys[start_idx:end_idx]
+    
+
+    def create_transformed_dataset(self, transform_function, transformation_name, destination_dir=None):
+        """
+        Creates a new dataset by applying a transformation function to all images in the original dataset.
+        
+        Args:
+            transform_function: Function that takes an image and returns a transformed version
+            transformation_name: Name of the transformation (used for naming the output directory)
+            destination_dir: Optional output directory path. If None, creates directory next to original dataset
+            
+        Returns:
+            Path to the created dataset directory
+        """
+        # Set up logging
+        logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+        logger = logging.getLogger(__name__)
+        
+        # Configure output directory
+        if destination_dir is None:
+            parent_dir = self.root.parent
+            destination_dir = parent_dir / f'{transformation_name}_dataset'
+        else:
+            destination_dir = Path(destination_dir)
+        
+        logger.info(f"Creating transformed dataset at: {destination_dir}")
+        
+        # Get source paths
+        source_base_dir = self.root
+        original_image_paths = self.get_image_paths()
+        
+        if not original_image_paths:
+            logger.error("No images found in the source dataset")
+            raise ValueError("Source dataset contains no images")
+        
+        logger.info(f"Found {len(original_image_paths)} images to transform")
+        
+        # Create destination directory structure
+        original_image_dirs = set(image_path.parent for image_path in original_image_paths)
+        destination_image_dirs = set(
+            destination_dir / image_dir.relative_to(source_base_dir) 
+            for image_dir in original_image_dirs
+        )
+        
+        for dir_path in destination_image_dirs:
+            dir_path.mkdir(parents=True, exist_ok=True)
+        
+        # Define processor function for parallel processing
+        processor_func = partial(
+            _process_single_image,
+            destination_dir=destination_dir,
+            source_base_dir=source_base_dir,
+            transform_function=transform_function
+        )
+        
+        # Process images in parallel
+        num_cores = max(1, multiprocessing.cpu_count() - 1)  # Leave one core free
+        logger.info(f"Processing images using {num_cores} cores")
+        
+        with multiprocessing.Pool(processes=num_cores) as pool:
+            results = pool.map(processor_func, original_image_paths)
+        
+        # Report results
+        success_count = sum(results)
+        logger.info(f"Transformation complete. Successfully processed {success_count}/{len(original_image_paths)} images")
+        
+        return destination_dir
+    
