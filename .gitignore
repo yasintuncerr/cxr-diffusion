@@ -185,3 +185,7 @@ data/
 data_*/
 **/data/
 **/data_*/
+
+
+# all images
+*.png
