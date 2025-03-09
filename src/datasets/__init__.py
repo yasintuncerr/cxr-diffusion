@@ -1,13 +1,9 @@
-from .nihcxr14_elixrb_dataset import NIHElixrbDataset
-from .nihcxr14_four_findinglabels_dataset import NIHFourFindingsDataset
-from .nihcxr14_image_dataset import NIHImageDataset
-from .nihcxr14_findinglabels import NIHFindingLabels
-
-
+from .embed_dataset import EmbeddingDataset
+from .nihcxr_dataset import NIHImageDataset
+from .nihcxr14_elixr_dataset import NIHElixrDataset
 
 __all__ = [
-    'NIHElixrbDataset',
-    'NIHFourFindingsDataset',
-    'NIHImageDataset',
-    'NIHFindingLabels',
+    "EmbeddingDataset",
+    "NIHImageDataset",
+    "NIHElixrDataset"
 ]
