@@ -201,3 +201,10 @@ data_*/
 *.yml
 *.safetensors
 *.bin
+
+# all logs
+*.log
+*/logs/
+logs/
+**/logs/
+**/logs_*/
