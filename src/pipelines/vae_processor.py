@@ -4,6 +4,9 @@ import PIL
 from typing import Optional, Union, List
 from diffusers import AutoencoderKL
 from diffusers.image_processor import VaeImageProcessor
+import numpy as np
+
+
 class VaeProcessor:
     def __init__(self, 
                  device: Union[str, torch.device] = "cuda",
@@ -17,38 +20,56 @@ class VaeProcessor:
         self.vae = vae.to(self.device)  # Move VAE to the specified device
         self.image_processor = VaeImageProcessor()
 
-    def encode_image(self, image: Union[PIL.Image.Image, torch.Tensor, List[PIL.Image.Image], List[torch.Tensor]]) -> torch.Tensor:
-        if isinstance(image, (PIL.Image.Image, list)):
-            processed = self.image_processor.preprocess(image)
+    @staticmethod
+    def numpy_to_pil(images):
+        """
+        Convert a NumPy image or a batch of images to a PIL image.
+        """
+        if images.ndim == 3:
+            images = images[None, ...]
+        images = (images * 255).round().astype("uint8")
+        if images.shape[-1] == 1:
+            # special case for grayscale (single channel) images
+            pil_images = [PIL.Image.fromarray(image.squeeze(), mode="L") for image in images]
         else:
-            if isinstance(image, torch.Tensor):
-                if image.dim() == 3:
-                    image = image.unsqueeze(0)
-                if image.dim() != 4:
-                    raise ValueError(f"Tensor must be 4D [B,C,H,W], got {image.dim()}D")
-            processed = image
-            
-        processed = processed.to(self.device)
-        return self.vae.encode(processed)
+            pil_images = [PIL.Image.fromarray(image) for image in images]
 
-    def prepare_latent(self,
-                      image: Union[PIL.Image.Image, torch.Tensor, List[PIL.Image.Image], List[torch.Tensor]],
-                      num_images_per_cond: int = 1) -> torch.Tensor:
+        return pil_images
+
+    def encode_image(self, image: Union[PIL.Image.Image, List[PIL.Image.Image]]) -> torch.Tensor:
+        if isinstance(image, (PIL.Image.Image, list)):
+            processed_image = self.image_processor.preprocess(image).to(self.device)
+        else:
+            raise ValueError("Input must be a PIL image or a list of PIL images")
         
-        latent_dist = self.encode_image(image)
-        latent = latent_dist.latent_dist.sample()
-        latent = self.vae.config.scaling_factor * latent
+        # Encode images
+        with torch.no_grad():
+            latents = self.vae.encode(processed_image).latent_dist.sample()
+            latents = self.vae.config.scaling_factor * latents
 
-        # Duplicate each input num_images_per_cond times
-        latents = latent.repeat_interleave(num_images_per_cond, dim=0)
         return latents
 
     def decode_latent(self, latent: torch.Tensor) -> Union[PIL.Image.Image, List[PIL.Image.Image]]:
-        latents = 1 / 0.18215 * latent
-        with torch.no_grad():
-            images = self.vae.decode(latents).sample
-            # Detach the tensor before postprocessing
-            images = images.detach()
+        # Scale the latents
+        latents = latent / self.vae.config.scaling_factor
         
-        processed_images = self.image_processor.postprocess(images)
-        return processed_images[0] if len(processed_images) == 1 else processed_images
+        # Make sure latents are on the correct device
+        latents = latents.to(self.device)
+        
+        # Decode the latents
+        with torch.no_grad():
+            images = []
+            for i in range(latents.shape[0]):
+                # Decode one sample at a time to avoid CUDA out of memory
+                image = self.vae.decode(latents[i:i+1]).sample
+                images.append(image)
+            
+            # Concatenate all images
+            image = torch.cat(images, dim=0)
+        
+        # Convert to numpy and process
+        image = image.cpu().permute(0, 2, 3, 1).float().numpy()
+        image = np.clip(image / 2 + 0.5, 0, 1)
+        
+        # Convert to PIL images
+        return self.numpy_to_pil(image)
