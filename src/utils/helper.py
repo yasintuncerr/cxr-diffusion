@@ -2,7 +2,7 @@
 import os
 import json
 import numpy as np
-from typing import List, Union
+from typing import List, Union, Tuple
 from dataclasses import dataclass
 
 from huggingface_hub import snapshot_download, login
@@ -41,7 +41,7 @@ def download(root:str, token:str)-> bool:
             ignore_patterns=[".*"],
         )
         return True
-    except HFHubHTTPError as e:
+    except Exception as e:
         print(f"Download failed: {e}")
         return False
 
@@ -68,7 +68,7 @@ class DsInfo:
         return self.parent.name + "_" + self.name if self.parent else self.name
 
 
-def load_info(path:str) -> (dict, List[DsInfo]):
+def load_info(path:str) -> Tuple[dict, List[DsInfo]]:
     if not os.path.exists(path):
         raise FileNotFoundError(f"File not found: {path}")
     
