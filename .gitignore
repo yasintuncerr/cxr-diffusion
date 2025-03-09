@@ -198,3 +198,6 @@ data_*/
 *.pth
 *.pt
 *.json
+*.yml
+*.safetensors
+*.bin
