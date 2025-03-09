@@ -189,3 +189,12 @@ data_*/
 
 # all images
 *.png
+
+
+# all model outputs
+*.pkl
+*.joblib
+*.h5
+*.pth
+*.pt
+*.json
