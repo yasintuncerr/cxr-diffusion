@@ -1,13 +1,14 @@
 import os
 import pickle
-from ..pipelines import CLIPTextProcessor, CLIPImageProcessor, VaeProcessor, InceptionProcessor
+from ..pipelines import CLIPTextProcessor, ClipVisionProcessor, VaeProcessor, InceptionProcessor
 from torch.utils.data import DataLoader
 from typing import Union, List
 from abc import ABC, abstractmethod
+from tqdm.auto import tqdm
 
 class FeatureExtractor:
     def __init__(self,
-                 processor: Union[CLIPTextProcessor, CLIPImageProcessor, VaeProcessor, InceptionProcessor],
+                 processor: Union[CLIPTextProcessor, ClipVisionProcessor, VaeProcessor, InceptionProcessor],
                  dataloader: DataLoader,
                  save_dir: str = None,
                  save_name: str = None,
@@ -28,29 +29,45 @@ class FeatureExtractor:
         pass
 
 
-    def save(self, data:dict):
+    def save(self, data: dict):
         if self.save_dir is None or self.save_name is None:
             return
+        print(f"Saving data to {self.save_dir}/{self.save_name}.pkl")
         with open(f"{self.save_dir}/{self.save_name}.pkl", "wb") as f:
             pickle.dump(data, f)
+
 
     def run(self):
         data = {}
         chunk_idx = -1
-        for i, batch in enumerate(self.dataloader):
-            output = self.extract(batch)
-            data.update(output)
-            if i % self.chunk_size == 0:
-                chunk_idx = i // self.chunk_size
-                self.save_name = f"{self.save_name}_{chunk_idx}"
-                self.save(data)
-                data = {}
+
+        print(f"Dataloader length: {len(self.dataloader)}")  # Dataloader uzunluğunu kontrol et
+        save_name = self.save_name
+
+        with tqdm(total=len(self.dataloader), desc="Processing Batches") as pbar:
+            for i, batch in enumerate(self.dataloader):
+                output = self.extract(batch)
+                data.update(output)
+
+                if len(data.keys()) >= self.chunk_size:
+                    chunk_idx +=1
+                    self.save_name = f"{save_name}_{chunk_idx:03}"
+                    print(f"Saving chunk {chunk_idx} on {self.save_dir}/{self.save_name}.pkl")
+                    self.save(data)
+                    data = {}
                 
-        if chunk_idx != -1:
-            self.save_name = f"{self.save_name}_{chunk_idx}"
-        
-        if data:
-            self.save(data)
+                pbar.update(1)
+
+            if chunk_idx != -1:
+                chunk_idx += 1
+                self.save_name = f"{save_name}_{chunk_idx:03}"
+
+            print(f"Final data: {data}")
+            if data:
+                print("Saving final data.")
+                self.save(data)
+            else:
+                print("Final data is empty.")
 
 
 class ClipTextFeatureExtractor(FeatureExtractor):
@@ -73,7 +90,7 @@ class ClipTextFeatureExtractor(FeatureExtractor):
 
 class ClipVisionFeatureExtractor(FeatureExtractor):
     def __init__(self,
-                 processor: CLIPImageProcessor,
+                 processor: ClipVisionProcessor,
                  dataloader: DataLoader,
                  save_dir: str = None,
                  save_name: str = None,
@@ -102,7 +119,7 @@ class VaeFeatureExtractor(FeatureExtractor):
 
     def extract(self, batch):
         image_idx, images = batch
-        output = self.processor.encode_image(images)
+        output = self.processor.encode(images)
         data = {}
         for i, idx in enumerate(image_idx):
             data[idx] = output[i]
