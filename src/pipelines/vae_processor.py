@@ -6,12 +6,21 @@ from diffusers import AutoencoderKL
 from diffusers.image_processor import VaeImageProcessor
 import numpy as np
 
+PipelineImageInput = Union[
+    PIL.Image.Image,
+    np.ndarray,
+    torch.Tensor,
+    List[PIL.Image.Image],
+    List[np.ndarray],
+    List[torch.Tensor],
+]
 
-class VaeProcessor:
+
+class VaeProcessor():
     def __init__(self, 
                  device: Union[str, torch.device] = "cuda",
                  vae: Optional[AutoencoderKL] = None):
-        
+        super().__init__()
         self.device = device if isinstance(device, torch.device) else torch.device(device)
         
         if vae is None:
@@ -19,34 +28,24 @@ class VaeProcessor:
         
         self.vae = vae.to(self.device)  # Move VAE to the specified device
         self.image_processor = VaeImageProcessor()
-
-    @staticmethod
-    def numpy_to_pil(images):
-        """
-        Convert a NumPy image or a batch of images to a PIL image.
-        """
-        if images.ndim == 3:
-            images = images[None, ...]
-        images = (images * 255).round().astype("uint8")
-        if images.shape[-1] == 1:
-            # special case for grayscale (single channel) images
-            pil_images = [PIL.Image.fromarray(image.squeeze(), mode="L") for image in images]
-        else:
-            pil_images = [PIL.Image.fromarray(image) for image in images]
-
-        return pil_images
-
-    def encode_image(self, image: Union[PIL.Image.Image, List[PIL.Image.Image]]) -> torch.Tensor:
-        if isinstance(image, (PIL.Image.Image, list)):
-            processed_image = self.image_processor.preprocess(image).to(self.device)
-        else:
-            raise ValueError("Input must be a PIL image or a list of PIL images")
-        
-        # Encode images
+    
+    
+    def encode(self, image: torch.Tensor) -> torch.Tensor:
+        image = image.to(self.device)
         with torch.no_grad():
-            latents = self.vae.encode(processed_image).latent_dist.sample()
-            latents = self.vae.config.scaling_factor * latents
-
+            latents = self.vae.encode(image).latent_dist.sample()
+            latents = latents*self.vae.config.scaling_factor
+        return latents
+    
+    def encode_image(self, 
+                     image: PipelineImageInput,
+                     
+                     ) -> torch.Tensor:
+        # Preprocess image
+        image = self.image_processor.preprocess(image)
+        
+        # Encode the image
+        latents = self.encode(image)
         return latents
 
     def decode_latent(self, latent: torch.Tensor) -> Union[PIL.Image.Image, List[PIL.Image.Image]]:
@@ -72,4 +71,4 @@ class VaeProcessor:
         image = np.clip(image / 2 + 0.5, 0, 1)
         
         # Convert to PIL images
-        return self.numpy_to_pil(image)
+        return self.image_processor.numpy_to_pil(image)
