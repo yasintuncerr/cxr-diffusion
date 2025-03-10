@@ -5,7 +5,7 @@ from transformers import CLIPImageProcessor, CLIPVisionModelWithProjection, CLIP
 from PIL import Image
 
 
-class ClipVisionEmbedder:
+class ClipVisionProcessor:
     
     def __init__(
         self,
