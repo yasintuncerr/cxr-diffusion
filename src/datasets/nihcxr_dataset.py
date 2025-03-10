@@ -101,12 +101,12 @@ class NIHImageDataset():
         else:
             raise ValueError("Invalid index type")
     
-        if row is None or row.empty:
+        if row is None or len(row) == 0:  # Liste uzunluğunu kontrol et
             raise ValueError(f"Index '{idx}' not found")
-        
-        image_idx = row["Image Index"].values[0]
-        path = row["Path"].values[0]
-
+    
+        image_idx = row[0]["Image Index"] if isinstance(idx, int) else row["Image Index"].values[0]
+        path = row[0]["Path"] if isinstance(idx, int) else row["Path"].values[0]
+    
         image = Image.open(path)
         if self.image_mode == "RGB":
             image = image.convert("RGB")
@@ -114,8 +114,8 @@ class NIHImageDataset():
             image = image.convert("L")
         else:
             raise ValueError(f"Invalid image mode: {self.image_mode}")
-        
+    
         if self.transform:
             image = self.transform(image)
-
-        return image, image_idx
+    
+        return image_idx, image
