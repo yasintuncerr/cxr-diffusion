@@ -212,3 +212,5 @@ logs/
 !resource/data/*.png
 !resource/
 !resource/data/
+
+!data/*.csv
