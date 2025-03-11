@@ -208,3 +208,6 @@ data_*/
 logs/
 **/logs/
 **/logs_*/
+
+!resource/
+!resource/data/
