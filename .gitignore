@@ -214,3 +214,4 @@ logs/
 !resource/data/
 
 !data/*.csv
+!data/filtered_nihcxr14.csv
