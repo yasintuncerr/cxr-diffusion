@@ -209,5 +209,4 @@ logs/
 **/logs/
 **/logs_*/
 
-!resource/
-!resource/data/
+!resource/data/*.png
