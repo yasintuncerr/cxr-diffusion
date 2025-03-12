@@ -44,7 +44,6 @@ class EmbeddingDataset:
             self.active_cols = self.h5_cols.copy()
         else:
             self.active_cols = []
-        print(f"h5_cols in _initialize_data: {self.h5_cols}")  # Hata ayıklama
 
     def _load_from_cache(self):
         cache_path = os.path.join(self.root, f".cache{self.name}.csv")
@@ -149,7 +148,7 @@ class EmbeddingDataset:
             raise ValueError("Invalid index type")
 
     def list_columns(self):
-        return self.h5_cols
+        return self.active_cols
 
     def set_active_columns(self, columns: List[str]):
         if not all(col in self.h5_cols for col in columns):
