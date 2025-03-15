@@ -394,6 +394,12 @@ class Unet2DConditionalTrainer():
         progress_bar = tqdm(range(remaining_epochs), disable=not self.accelerator.is_local_main_process)
         progress_bar.set_description(f"Epochs")
 
+        if validation_samples is not None:
+            sample_images = self.generate_samples(validation_samples)
+            if sample_images:
+                self.save_image_grid(sample_images, 0)
+
+
         for epoch in range(self.current_epoch, self.config.num_epochs):
             self.current_epoch = epoch
             self.unet.train()
